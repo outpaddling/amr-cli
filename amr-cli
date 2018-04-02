@@ -1,0 +1,101 @@
+#!/bin/sh -e
+
+##########################################################################
+#   Script description:
+#       AMR Pipeline command line interface
+#
+#   Arguments:
+#       1.  Resistome threshold
+#       2.  Resistance gene database
+#       3.  Annotations file
+#       4+. Raw input files
+#       
+#   Returns:
+#       
+#   History:
+#   Date        Name        Modification
+#   2018-04-02  Jason Bacon Begin
+##########################################################################
+
+usage()
+{
+    printf "Usage: $0 resistome-threshold resistance-gene-database annotations-file raw-file [raw-file ...]\n"
+    exit 1
+}
+
+
+##########################################################################
+#   Main
+##########################################################################
+
+if [ $# -lt 4 ]; then
+    usage
+fi
+
+threshold=$1
+resistance_db="$2"
+annotations_file="$3"
+shift
+shift
+shift
+raw_files="$@"
+
+############################################################################
+# 2.  Quality control: Remove adapter sequences from raw data
+
+for file in $raw_files; do
+    output_file=trimmed-$file
+    # If the output file already exists, assume cutadapt was already run
+    # successfully.  Remove trimmed-* before running this script to force
+    # cutadapt to run again.
+    if [ ! -e $output_file ]; then
+	cutadapt $file > $output_file
+    else
+	printf "$raw already processed by cutadapt.\n"
+    fi
+done
+
+############################################################################
+# 3. If sequences are from a host organism, remove host dna
+
+# Index resistance gene database
+if [ ! -e $resistance_db.ann ]; then
+    bwa index $resistance_db
+fi
+
+############################################################################
+# 4. Align to target database with bwa mem.
+
+for file in $raw_files; do
+    # Output is an aligned sam file.  Replace trimmed- prefix with aligned-
+    # and replace .fastq suffix with .sam
+    output_file=aligned-${file%.fastq}.sam
+    if [ ! -e $output_file ]; then
+	printf "\nRunning bwa-mem on $file...\n"
+	bwa mem $resistance_db trimmed-$file > $output_file
+    else
+	printf "$file already processed by bwa mem\n"
+    fi
+done
+
+############################################################################
+# 5. Resistome analysis.
+
+aligned_files=aligned-*.sam
+for file in $aligned_files; do
+    if [ ! -e ${file%.sam}group.tsv ]; then
+	printf "\nRunning resistome analysis on $file...\n"
+	resistome -ref_fp $resistance_db -sam_fp $file \
+	    -annot_fp $annotations_file \
+	    -gene_fp ${file%.sam}gene.tsv \
+	    -group_fp ${file%.sam}group.tsv \
+	    -class_fp ${file%.sam}class.tsv \
+	    -mech_fp ${file%.sam}mech.tsv \
+	    -t $threshold
+    else
+	printf "$file already processed by resistome.\n"
+    fi
+done
+
+############################################################################
+# 6. Rarefaction analysis?
