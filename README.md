@@ -1,2 +1,3 @@
-# amr-cli
-AMR Pipeline Command Line Interface
+AMR-CLI
+-------
+AMR bacterial genome processing pipeline
